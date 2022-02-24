@@ -51,11 +51,30 @@ CatchChrootedPacmanLog() {
 
 ### Starts logging into the install log. ###
 InstallLog_Start() {
+    local preprelogfile="$(eos-select-file-server --logfilename)"
     cat <<EOF > $log
 ########## $log by $progname
 ########## Started (UTC): $(date -u "+%x %X")
 ########## Install mode: $mode
+########## ISO version: $ISO_version
+########## Calamares version: $calamares_version
+
+## >>> Preliminary log before starting calamares:
 EOF
+    if [ -r $preprelogfile ] ; then
+        cat <<EOF >> $log
+$(cat $preprelogfile)
+
+EOF
+    fi
+    cat <<EOF >> $log
+$(cat "$prelogfile")
+## <<< End of preliminary log.
+
+EOF
+    rm -f "$prelogfile"
+    rm -f "$preprelogfile"
+
     FollowFile "$log" "Install log" 20 20
 }
 
@@ -85,11 +104,13 @@ AskMode() {
         --button="Online!!Vanilla theming, internet required":12
         --button="Offline!!Xfce, EndeavourOS theming, internet not required":14
     )
+    if [ 0 -eq 1 ] ; then
     cmd+=(
         --field=' Install Log on Terminal!Show overall log about install on a terminal':CHK $ShowInstallLog
-        --field=' Pacman Log on Terminal!Show package management log on a terminal':CHK      $ShowPacmanLog
+        #--field=' Pacman Log on Terminal!Show package management log on a terminal':CHK      $ShowPacmanLog
         --field='':LBL ""
     )
+    fi
 
     local result
     result="$("${cmd[@]}")"       # ask mode from the user
@@ -102,8 +123,8 @@ AskMode() {
         13|14) mode=offline ;;
         252|*) exit $ret ;;
     esac
-    ShowInstallLog=$(echo "$result" | cut -d'|' -f1)
-    ShowPacmanLog=$( echo "$result" | cut -d'|' -f2)
+    #ShowInstallLog=$(echo "$result" | cut -d'|' -f1)
+    #ShowPacmanLog=$( echo "$result" | cut -d'|' -f2)
 }
 
 ### Starts the calamares installer process and logging. ###
@@ -133,12 +154,23 @@ run_hotfix_start() {
     local file=hotfix-start.bash
     local url=$(eos-github2gitlab https://raw.githubusercontent.com/endeavouros-team/ISO-hotfixes/main/$file)
 
-    if wget --timeout=30 -q -O $file $url ; then
-        all_sudo_commands+="; bash $PWD/$file"
-        all_sudo_commands+="; echo '===> Hotfixes definition file $file executed.'"
+    if Wget2Curl --timeout=30 -q -O "$workdir/$file" "$url" ; then
+        sudo bash "$workdir/$file"
+        PreLog "Hotfixes definition file from $url executed."
     else
-        all_sudo_commands+="; echo '===> Fetching the hotfixes definition file failed!'"
+        PreLog "Fetching $url failed!"
     fi
+}
+
+BootloaderId() {
+    local blid="endeavouros-$(shuf -i 1000-9999 -n1)"
+    PreLog "New bootloader id: '$blid'"
+    sudo sed -i $cfolder/modules/bootloader.conf -e "s|^efiBootloaderId:.*|efiBootloaderId: \"$blid\"|"
+}
+
+PreLog() {
+    # Some logs before we can use endeavour-install.log.
+    echo "==> $1" >> "$prelogfile"
 }
 
 ###  Everything starts in the Main function. ###
@@ -149,16 +181,30 @@ Main() {
 
     local lang="$1"
     local mode="$2"                             # 'community' or '' (empty)
-    local ShowInstallLog="$3"
-    local ShowPacmanLog="$4"
+    local ShowInstallLog="TRUE"                 # TRUE --> show install log terminal window
+    local ShowPacmanLog="FALSE"                 # TRUE --> show pacman  log terminal window
     local progname="$(basename "$0")"           # for help and messages
     local Home=/home/liveuser                   # liveuser's home folder
     local log=$Home/endeavour-install.log       # install log
     local cfolder=/etc/calamares                # folder for calamares configuration files
     local all_sudo_commands=":"                 # all root commands will be collected to this variable!
     local workdir=""
+    local prelogfile=""
+    local ISO_version=$(cat /usr/lib/endeavouros-release | cut -d'=' -f2)
+    local calamares_version="$(pacman -Q calamares_current 2>/dev/null | awk '{print $NF}')"
 
-    if [ "$I_am_only_testing" = "true" ] ; then
+    [ -n "$calamares_version" ] || GUIDIE "error: calamares is not installed!"
+
+    if [ $(vercmp "$calamares_version" 3.2.49.1-3) -gt 0 ] ; then
+        # assume calamares is showing progress on installing packages
+        ShowInstallLog=FALSE
+        ShowPacmanLog=FALSE
+    fi
+
+    ShowInstallLog=TRUE    # 2022-Feb-24: REMOVE THIS LINE when calamares progress display is fixed.
+
+    if [ 0 -eq 1 ] ; then
+        # Testing settings only, not for production!
         Home=$HOME
         #EOS_FILESERVER_SITE=github
         mode=community
@@ -167,38 +213,33 @@ Main() {
         ShowPacmanLog=FALSE
     fi
 
-    workdir=$(mktemp -d $Home/work.XXXXX) || GUIDIE "creating work folder failed."
+    workdir="$Home/work.$progname.xyz"
+    mkdir -p "$workdir"
 
-    _init_translations $lang || { GUIDIE "language init failed" ; }
+    prelogfile="$workdir/preliminary.log"
+    rm -f "$prelogfile"
 
-    # asks the value for $mode
+    BootloaderId
+
+    _init_translations $lang || GUIDIE "language init failed"
+
     case "$mode" in
-        "" | test) AskMode ;;
+        "" | test) AskMode ;;    # ask the value for $mode
     esac
 
     if eos-connection-checker ; then
         run_hotfix_start              # run possible hotfixes before copying settings.conf file
     fi
 
-    # copy config files based on $mode
-
-    pushd $workdir 2>/dev/null || GUIDIE "cannot go to folder $workdir"
-
     case "$mode" in
         online | offline | community)
-            all_sudo_commands+="; cp $cfolder/settings_$mode.conf $cfolder/settings.conf"
-            all_sudo_commands+="; echo '===> File settings.conf updated.'"
+            sudo cp $cfolder/settings_$mode.conf $cfolder/settings.conf
+            PreLog "File settings.conf updated."
             ;;
         *)
             GUIDIE "unsupported mode '$mode'"
             ;;
     esac
-
-    # now actually run hotfixes and copy settings.conf
-    sudo bash -c "${all_sudo_commands[*]}"
-
-    popd 2>/dev/null
-    rm -rf $workdir
 
     if [ "$I_am_only_testing" = "true" ] ; then
         return

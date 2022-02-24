@@ -34,7 +34,7 @@ _question='&#63;'      # '?'
 ###################### Now the actual strings to be translated: ######################
 # func   <placeholder>         "string"
 
-_tr_add2 welcome_disabled     "$PRETTY_PROGNAME: käyttö on estetty. Ota se käyttöön valitsimella --enable."
+_tr_add2 welcome_disabled     "$PRETTY_PROGNAME: käyttö on estetty. Ota se käyttöön valitsimella --enable (tilapäisesti: --once)."  # changed 2022-Feb-21
 
 _tr_add2 butt_later           "Nähdään myöhemmin"
 _tr_add2 butt_latertip        "Pidä $PRETTY_PROGNAME käytössä"
@@ -127,7 +127,7 @@ _tr_add2 add_more_apps_bt_bm   "Bluetooth (blueman) Xfce:lle"
 
 ####################### NEW STUFF AFTER THIS LINE:
 
-_tr_add2 settings_dis_contents   "Saat $PRETTY_PROGNAME:n taas käyttöön kun ajat komennon: $PROGNAME --enable"
+_tr_add2 settings_dis_contents   "Saat $PRETTY_PROGNAME:n taas käyttöön kun ajat komennon:\n<tt>   $PROGNAME --enable</tt>\n"
 _tr_add2 settings_dis_text       "Ota uudestaan käyttöön $PRETTY_PROGNAME:"
 _tr_add2 settings_dis_title      "Kuinka otat uudestaan käyttöön $PRETTY_PROGNAME:n"
 _tr_add2 settings_dis_butt       "Selvä"
@@ -303,9 +303,14 @@ _tr_add2 after_install_vbox1         "Käynnistä VirtualBox Guest -toiminnot"
 _tr_add2 after_install_vbox2         "Käynnistääksesi VirtualBox Guest -toiminnot, mene <b>AfterInstall</b> välilehdelle ja klikkaa painiketta "
 
 # 2021-Jun-17
-_tr_add2 after_install_r8168         "Ethernet-ongelma$_question Poista paketti r8168$_exclamation"
-_tr_add2 after_install_r8168_tip     "Paketin <b>r8168</b> poistaminen <i>saattaa</i> korjata langallisen yhteyden (uudelleenkäynnistys tarvitaan)"
+_tr_add2 after_install_r8168         "Ethernet-ongelmia$_question Vaihda ajuriksi r8168 tai r8169$_exclamation"   # changed 2021-Dec-14 !!
+_tr_add2 after_install_r8168_tip     "Vaihda langallisen netin ajuri (uudelleenkäynnistys voidaan tarvita)"       # changed 2021-Dec-14 !!
 
 # 2021-Oct-08
 _tr_add2 daily_assist_DEinfo         "lisätietoa"                                      # assume prefix "DE:", e.g.: "Xfce: info"
 _tr_add2 daily_assist_DEinfo_tip     "lisätietoa tästä työpöydästä/ikkunamanagerista"  # assume prefix "DE:", e.g.: "Xfce: more information ..."
+
+# 2022-Feb-16
+_tr_add2 add_more_apps_qs            "Valitse ja asenna suosittuja sovelluksia"        # runs eos-quickstart
+_tr_add2 add_more_apps_qstip         "Valitse ja asenna joukosta suosittuja sovelluksia"
+

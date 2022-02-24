@@ -67,6 +67,13 @@ Cmd() {
             SUDO_CMDS+=" ; echo '$(Footer)' >> $FILE_OF_LOGS"
             return
             ;;
+        cmd_and_lines)
+            # params: cmd_and_lines "cmd" "lines"
+            Header "$2" >> $FILE_OF_LOGS
+            echo "$3"   >> $FILE_OF_LOGS
+            Footer      >> $FILE_OF_LOGS
+            return
+            ;;
     esac
 
     Header "$@" >> "$FILE_OF_LOGS"
@@ -120,6 +127,13 @@ RemovePersonalData() {
     fi
     cp -a "$FILE_OF_LOGS" "$FILE_OF_LOGS.bak"
     local user
+    local ssid="foobarfoobarfoobar"
+    local mac="foobarfoobarfoobar"
+
+    if [ -x /usr/bin/iwgetid ] ; then
+        ssid=$(iwgetid -r)
+        mac=$(iwgetid -ra)
+    fi
 
     # hide real user names (that are found in /etc/passwd) from logs
     for user in $(UserNames 1000 50000) ; do
@@ -143,8 +157,21 @@ RemovePersonalData() {
             -e "s|LOGNAME=$user|LOGNAME=_user_|" \
             -e "s|USERNAME=$user|USERNAME=_user_|" \
             -e "s|USER=$user|USER=_user_|" \
-            -e 's|192\.168\.[0-9]*\.[0-9]*|_ipv4_address_|' \
-            -e 's| fe80::[0-9a-f:]*\([ \.]\)|_ipv6_address_\1|'
+            -e 's| with address .*\.$| with address _ip_address_.|' \
+            -e 's| new address record for .* on \(.*\)$| new address record for _ip_address on \1|' \
+            -e "s| policy: set '.*' (\(.*\)) as default for | policy: set '_ssid_' (\1) as default for |" \
+            -e "s| connection '.*' | connection '_ssid_' |" \
+            -e "s|set MAC address to .* (|set MAC address to _mac_address (|" \
+            -e "s| associate with .* (| associate with _mac_address (|" \
+            -e "s| access point '.*' | access point '_ssid_' |" \
+            -e "s|'ssid' value '.*'$|'ssid' value '_ssid_'|" \
+            -e "s|(SSID='.*' |(SSID='_ssid_' |" \
+            -e 's| wireless network ".*"$| wireless network "_ssid_"|' \
+            -e 's|192\.168\.[0-9]*\.[0-9]*|_ip_address_|' \
+            -e 's| fe80::[0-9a-f:]*\([ \.]\)|_ip_address_\1|' \
+            -e "s|'$ssid'|'_ssid_'|" \
+            -e "s|$mac|_mac_address|"
+            
     done
 
     # hide hostname from logs
@@ -170,6 +197,27 @@ RemovePersonalData() {
 }
 
 IsInstalled() { /usr/bin/pacman -Q "$1" &> /dev/null ; }
+
+ForeignInfo() {
+    # input & output: line
+    local pkg ver desc
+    local data ix l2
+
+    readarray -t data <<< $(LANG=C pacman -Qmi | grep -P '^Name|^Version|^Description')
+
+    for ((ix=0; ix<${#data[@]}; ix=ix+3 )) ; do
+        pkg="$( echo "${data[ix]}"   | sed 's|[^:]*: ||')"
+        ver="$( echo "${data[ix+1]}" | sed 's|[^:]*: ||')"
+        desc="$(echo "${data[ix+2]}" | sed 's|[^:]*: ||')"
+        
+        l2="$(printf "%-40s %-15s %s" "$pkg" "$ver" "$desc")"
+        if [ -n "$line" ] ; then
+            line="$(echo "$line" ; echo "$l2")"
+        else
+            line="$(echo "$l2")"
+        fi
+    done
+}
 
 Main()
 {
@@ -212,6 +260,7 @@ Main()
     local rdbut="<b>Remove personal data from logs</b>"
     local slbut="<b>Send logs to internet</b>"
     local inxi="inxi -Fxxc0z"
+    local foreigns="pacman -Qm"
 
     local cmds
     local sendToInternet=no
@@ -259,6 +308,7 @@ Main()
     IsInstalled grub && log_tool_cmd+=(false "$grub" "Grub configuration file")
     log_tool_cmd+=(
         true  "$pacmanconf" "Pacman package manager configuration file"
+        true  "$foreigns"   "List foreign packages"
         true  "$rdbut"      "$rdtip"
         false "$slbut"      "$sltip"
     )
@@ -308,6 +358,11 @@ Main()
             "$lsusb")    Cmd $xx ;;
             "$hwinfo")   Cmd $xx ;;
             "$inxi")     Cmd $xx ;;
+            "$foreigns")
+                local line=""
+                ForeignInfo
+                Cmd cmd_and_lines "$xx" "$line"    # does special handling
+                ;;
         esac
     done
     if [ "$SUDO_CMDS" != ":" ] ; then

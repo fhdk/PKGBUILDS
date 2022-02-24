@@ -1,12 +1,18 @@
 #!/bin/bash
 
 # TODO:
-#   - check if deletion of e.g. pamac-aur might remove also pamac-aur-git (names have same beginning)
+#   - 2.12.2021:  update of multi-package PKGBUILD? Install should work, but deletion of old packages (thus updating) doesn't!
+#   - older: check if deletion of e.g. pamac-aur might remove also pamac-aur-git (names have same beginning)
+#   - better epoch handling
 
 echoreturn() { echo "$@" ; }     # for "return" values!
 
 echo2()      { echo   "$@" >&2 ; }    # output to stderr
 printf2()    { printf "$@" >&2 ; }    # output to stderr
+
+DebugWithLineNr() {
+    echo2 "${PROGNAME}, line ${BASH_LINENO[0]}: $1"
+}
 
 DIE() {
     echo2 "Error: $@"
@@ -122,10 +128,17 @@ Build()
     local assetsdir="$2"
     local pkgbuilddir="$3"
     local pkgname
-    local pkg
+    local pkg pkgs
     local workdir=$(mktemp -d)
     local log=$workdir/buildlog-"$pkgdirname".log
     local missdeps="Missing dependencies:"
+    local opts=""
+
+    if [ "${#PKG_MAKEPKG_OPTIONS[@]}" -gt 0 ] ; then
+        if [ -n "${PKG_MAKEPKG_OPTIONS[$pkgdirname]}" ] ; then   # from assets.conf
+            opts="${PKG_MAKEPKG_OPTIONS[$pkgdirname]}"
+        fi
+    fi
 
     Pushd "$workdir"
       cp -r "$pkgbuilddir" .
@@ -134,7 +147,7 @@ Build()
 
       # now build, assume we have PKGBUILD
       # special handling for missing dependencies
-      LANG=C makepkg --clean 2>/dev/null >"$log" || {
+      LANG=C makepkg --clean $opts 2>/dev/null >"$log" || {
           if [ -z "$(grep "$missdeps" "$log")" ] ; then
               Popd -c2
               DIE "makepkg for '$pkgname' failed"
@@ -144,15 +157,19 @@ Build()
           :
           makepkg --syncdeps --clean >/dev/null || { Popd -c2 ; DIE "makepkg for '$pkgname' failed" ; }
       }
-      pkg="$(ls -1 ${pkgname}-[0-9]*.pkg.tar.$_COMPRESSOR)"
-      pkg="$(HandlePossibleEpoch "$pkgname" "$pkg")"
-      mv $pkg "$assetsdir"
-      pkg="$assetsdir/$pkg"
-
+      # pkg="$(ls -1 ${pkgname}-[0-9]*.pkg.tar.$_COMPRESSOR)"
+      pkgs="$(ls -1 *.pkg.tar.$_COMPRESSOR)"
+      [ -n "$pkgs" ] || DIE "$pkgdirname: build failed"
+      for pkg in $pkgs ; do
+          pkg="$(HandlePossibleEpoch "$pkgname" "$pkg")"
+          mv $pkg "$assetsdir"
+          built+=("$assetsdir/$pkg")
+          built_under_this_pkgname+=("$pkg")
+      done
       Popd
     Popd
     rm -rf "$workdir"
-    echoreturn "$pkg"
+    # echoreturn "$pkg"
 }
 
 PkgBuildName()
@@ -265,8 +282,13 @@ ListNameToPkgName()
     hook="${ASSET_PACKAGE_HOOKS["$pkgname"]}"
     if [ -n "$hook" ] ; then
         if [ "$fetch" = "yes" ] ; then
-            HookIndicator "$hook_yes"
             $hook
+            case $? in
+                0) HookIndicator "$hook_yes" ;;          # OK
+                11) HookIndicator "$hook_pkgver" ;;      # pkgver was updated by hook
+                1) HookIndicator "?" ;;                  # failed
+                *) HookIndicator "??" ;;                 # unknown error
+            esac
         fi
     else
         HookIndicator "$hook_no"
@@ -276,6 +298,12 @@ ListNameToPkgName()
 }
 
 HubRelease() {
+    if which logstuff >& /dev/null ; then
+        if ! logstuff state ; then
+            echo2 "==> logstuff on"
+            logstuff on
+        fi
+    fi
     hub release "$@"
 }
 
@@ -285,7 +313,7 @@ Assets_clone()
         return
     fi
 
-    local xx hook
+    local xx yy hook
 
     # echo2 "It is possible that your local release assets in folder $ASSETSDIR"
     # echo2 "are not in sync with github."
@@ -300,9 +328,11 @@ Assets_clone()
                 read2
 
                 case "$REPLY" in
-                    [yY]*|"") ;;
+                    [yY]*|"")
+                        echo2 "==> Using remote assets."
+                        ;;
                     *)
-                        echo2 "Using local assets."
+                        echo2 "==> Using local assets."
                         echo2 ""
                         return
                         ;;
@@ -353,6 +383,7 @@ Assets_clone()
     if [ -n "${ASSET_PACKAGE_EPOCH_HOOKS[*]}" ] ; then
         local oldnames oldname newname
         for xx in "${PKGNAMES[@]}" ; do
+            PkgbuildExists "$xx" 3 || continue
             hook="${ASSET_PACKAGE_EPOCH_HOOKS[$xx]}"
             if [ -n "$hook" ] ; then
                 oldnames="$(/usr/bin/ls -1 ${xx}-*)"  # files *.zst and *.zst.sig
@@ -367,6 +398,18 @@ Assets_clone()
     sleep 1
 
     Popd
+}
+
+PkgbuildExists() {
+    local pkgname="$1"                         # a name from "${PKGNAMES[@]}"
+    local special="$2"
+    local yy=$(basename "$pkgname")
+    if [ -r "$PKGBUILD_ROOTDIR/$yy/PKGBUILD" ] ; then
+        return 0
+    else
+        [ "$special" != "" ] && DebugWithLineNr "no PKGBUILD!"
+        return 1
+    fi
 }
 
 IsEmptyString() {
@@ -513,8 +556,7 @@ RunPreHooks()
     fi
 }
 
-RunPostHooks()
-{
+GitUpdate_repo() {
     local newrepodir
     if [ -n "$built" ] || [ "$repoup" = "1" ] ; then
         case "$REPONAME" in
@@ -527,15 +569,20 @@ RunPostHooks()
         esac
         if [ -e "$newrepodir/.GitUpdate" ] ; then
             if [ -x /usr/bin/GitUpdate ] ; then
-                cd "$newrepodir"
+                FinalStopBeforeSyncing "$REPONAME repo"
+                pushd "$newrepodir" >/dev/null
                 /usr/bin/GitUpdate
+                popd >/dev/null
+                ManualCheckOfAssets addition repo
             else
                 WARN "$FUNCNAME: no GitUpdate app found."
             fi
         fi
     fi
-#    return
-    
+}
+
+RunPostHooks()
+{
     if [ -n "$ASSET_POST_HOOKS" ] ; then
         ShowIndented "Running asset post hooks"
         local xx
@@ -685,6 +732,16 @@ Vercmp() {
     fi
 }
 
+PkgnameFilter() {
+    sed 's|-[^-]*-[^-]*-[^-]*$||'
+}
+
+PkgnameFromPkg() {
+    local pkg="$1"
+    pkg="$(basename "$pkg")"
+    echo "$pkg" | PkgnameFilter
+}
+
 Usage() {
     cat <<EOF >&2
 $PROGNAME: Build packages and transfer results to github.
@@ -693,6 +750,7 @@ $PROGNAME [ options ]
 Options:
     -n  | -nl | --dryrun-local  Show what would be done, but do nothing. Use local assets.
     -nn | -nr | --dryrun        Show what would be done, but do nothing.
+    -ad | --allow-downgrade     New package may have smaller version number.
     --repoup                    (Advanced) Force update of repository database files.
     --aurdiff                   Show PKGBUILD diff for AUR packages.
 EOF
@@ -719,6 +777,7 @@ Main2()
     local filelist_txt
     local use_filelist               # yes or no
     local ask_timeout=60
+    local allow_downgrade=no
     local AUR_DIFFS=()
     local AUR_DIFF_PKGS=()
     local mirror_check_wait=180
@@ -740,14 +799,19 @@ Main2()
                     cmd=dryrun ; use_local_assets=1 ;;
                 --dryrun | -nr | -nn)
                     cmd=dryrun ;;
-                --mirrorcheck=*)
-                    mirror_check_wait="${xx#*=}";;
                 --repoup)
                     repoup=1 ;;                  # sync repo even when no packages are built
                 --aurdiff)
                     aurdiff=1 ;;
+                --allow-downgrade | -ad)
+                    allow_downgrade=yes ;;
+
+                # currently not used!
+                --mirrorcheck=*)
+                    mirror_check_wait="${xx#*=}";;
                 --versuffix=*)
-                    pkgver_suffix="${xx#*=}" ;;  # currently not used!
+                    pkgver_suffix="${xx#*=}" ;;
+
                 *) Usage 0  ;;
             esac
         done
@@ -789,6 +853,8 @@ Main2()
     local buildsavedir          # tmp storage for built packages
     local pkg_archive="$ASSETSDIR/PKG_ARCHIVE"
     local notexist='<non-existing>'
+    local cmpresult
+    local total_items_to_build=0
 
     echo2 "Finding package info ..."
 
@@ -797,6 +863,7 @@ Main2()
         ShowIndented "$(JustPkgname "$xx")" 1
         pkgdirname="$(ListNameToPkgName "$xx" yes)"
         test -n "$pkgdirname" || DIE "converting or fetching '$xx' failed"
+        PkgbuildExists "$pkgdirname" 1 || continue
 
         # get versions from latest PKGBUILDs
         tmp="$(PkgBuildVersion "$PKGBUILD_ROOTDIR/$pkgdirname")"
@@ -814,11 +881,21 @@ Main2()
                 ;;
         esac
         oldv["$pkgdirname"]="$tmpcurr"
-        if [ $(Vercmp "$tmp" "$tmpcurr") -gt 0 ] ; then
-            echo2 "update pending from $tmpcurr to $tmp"
-            WantAurDiffs "$xx" "$pkgdirname"
-        else
+
+        cmpresult=$(Vercmp "$tmp" "$tmpcurr")
+
+        if [ $cmpresult -eq 0 ] ; then
             echo2 "OK ($tmpcurr)"
+            continue
+        fi
+        if [ $cmpresult -lt 0 ] &&  [ "$allow_downgrade" = "no" ] ; then
+            echo2 "OK ($tmpcurr)"
+            continue
+        fi
+        ((total_items_to_build++))
+        echo2 "$tmpcurr ==> $tmp"
+        if [ $cmpresult -gt 0 ] ; then
+            WantAurDiffs "$xx" "$pkgdirname"
         fi
     done
     if [ -n "$AUR_DIFFS" ] ; then
@@ -826,7 +903,13 @@ Main2()
     fi
     Popd
 
-    ExplainHookMarks
+    printf2 "\nItems to build: %s\n" "$total_items_to_build"
+
+    if [ 0 -eq 1 ] ; then
+        ExplainHookMarks
+    else
+        printf2 "\n"
+    fi
 
     case "$cmd" in
         dryrun)
@@ -838,14 +921,40 @@ Main2()
 
     buildsavedir="$(mktemp -d "$HOME/.tmpdir.XXXXX")"
 
+    local built_under_this_pkgname
+    # local remove_under_this_pkgname
     echo2 "Check if building is needed..."
     for xx in "${PKGNAMES[@]}" ; do
         pkgdirname="$(ListNameToPkgName "$xx" no)"
-        if [ $(Vercmp "${newv["$pkgdirname"]}" "${oldv["$pkgdirname"]}") -gt 0 ] ; then
+        #PkgbuildExists "$xx" 2 || continue
+        PkgbuildExists "$xx" || continue
 
-            # old pkg
-            pkgname="$(PkgBuildName "$pkgdirname")"
-            for zz in zst xz ; do
+        cmpresult=$(Vercmp "${newv["$pkgdirname"]}" "${oldv["$pkgdirname"]}")
+
+        # See if we have to build.
+        [ "$cmpresult" -eq 0 ] && continue
+        if [ "$cmpresult" -lt 0 ] && [ "$allow_downgrade" = "no" ] ; then
+            continue
+        fi
+
+        # Build the package (or possibly many packages!)
+        built_under_this_pkgname=()
+        # remove_under_this_pkgname=()   # we don't know only from pkgname!
+
+        echo2 "==> $pkgdirname:"
+        buildStartTime="$(TimeStamp)"
+
+        Build "$pkgdirname" "$buildsavedir" "$PKGBUILD_ROOTDIR/$pkgdirname"
+
+        echo2 "    ==> Build time: $(TimeStamp $buildStartTime)"
+        for yy in "${built_under_this_pkgname[@]}" ; do
+            echo2 "    ==> $yy"
+        done
+
+        # determine old pkgs
+        for zz in zst xz ; do
+            for yy in "${built_under_this_pkgname[@]}" ; do
+                pkgname="$(PkgnameFromPkg "$yy")"
                 pkg="$(ls -1 "$ASSETSDIR/$pkgname"-[0-9]*.pkg.tar.$zz 2> /dev/null)"    # $_COMPRESSOR
                 test -n "$pkg" && {
                     removable+=("$pkg")
@@ -856,20 +965,7 @@ Main2()
                     #removableassets+=("$yy".sig)
                 }
             done
-
-            printf2 "==> $pkgname: "
-            buildStartTime="$(TimeStamp)"
-
-            # new pkg
-            pkg="$(Build "$pkgdirname" "$buildsavedir" "$PKGBUILD_ROOTDIR/$pkgdirname")"
-
-            echo2 "build time: $(TimeStamp $buildStartTime)"
-
-            case "$pkg" in
-                "") DIE "$pkgdirname: build failed" ;;
-                *)  built+=("$pkg")               ;;
-            esac
-        fi
+        done
     done
 
     case "$SIGNER" in
@@ -921,7 +1017,8 @@ Main2()
                 for xx in "${built[@]}" ; do
                     case "$xx" in
                         *.pkg.tar.$_COMPRESSOR)
-                            pkgname="$(basename "$xx" | sed 's|\-[0-9].*$||')"
+                            #pkgname="$(basename "$xx" | sed 's|\-[0-9].*$||')"
+                            pkgname="$(PkgnameFromPkg "$xx")"
                             repo_removes+=("$pkgname")
                             ;;
                     esac
@@ -958,7 +1055,8 @@ Main2()
                 
                 if [ -n "$repo_removes" ] ; then
                     # check if repo db contains any of the packages to be removed
-                    yy="$(tar --list --exclude */desc -f "$ASSETSDIR/$REPONAME".db.tar.$REPO_COMPRESSOR | sed 's|-[0-9].*$||')"
+                    # yy="$(tar --list --exclude */desc -f "$ASSETSDIR/$REPONAME".db.tar.$REPO_COMPRESSOR | sed 's|-[0-9].*$||')"
+                    yy="$(tar --list -f "$ASSETSDIR/$REPONAME".db.tar.$REPO_COMPRESSOR | grep "/desc$" | sed 's|-[^-]*-[^-]*$||')"
                     zz=()
                     for xx in "${repo_removes[@]}" ; do
                         if [ -n "$(echo "$yy" | grep "^$xx$")" ] ; then
@@ -990,6 +1088,13 @@ Main2()
                 cp -a "$ASSETSDIR/$REPONAME".$xx.tar.$REPO_COMPRESSOR.sig "$ASSETSDIR/$REPONAME".$xx.sig
             fi
         done
+
+        # Now all is ready for syncing with github.
+
+        GitUpdate_repo
+
+        sleep 3
+        echo2 "Syncing $REPONAME release assets with github:"
 
         case "$REPONAME" in
             endeavouros)
@@ -1081,6 +1186,7 @@ AssetCmdLast() {
 
 ManualCheckOfAssets() {
     local op="$1"
+    local what="$2"
     sleep 1
     while true ; do
         if [ 0 -eq 1 ] ; then
@@ -1089,7 +1195,11 @@ ManualCheckOfAssets() {
         else
             : #printf2 "\n%s "  "Is $op OK (y/n)?"
         fi
-        read2 -t 10 -p "$tag: Is $op OK (Y/n)? "
+        case "$what" in
+            assets) what="$tag" ;;
+            repo)   ;;
+        esac
+        read2 -t 10 -p "$what: Is $op OK (Y/n)? "
         case "$REPLY" in
             [yY]* | "") break ;;
             *) ;;
@@ -1098,14 +1208,17 @@ ManualCheckOfAssets() {
     echo2 ""
 }
 
-ManageGithubReleaseAssets() {
-    echo2 "Final stop before syncing with github!"
+FinalStopBeforeSyncing() {
+    local what="$1"
+    printf2 "\n%s\n" "Final stop before syncing '$what' with github!"
     read2 -p "Continue (Y/n)? "
     case "$REPLY" in
         [yY]*|"") ;;
         *) Exit 0 ;;
     esac
+}
 
+ManageGithubReleaseAssets() {
     local last_tag=$((${#RELEASE_TAGS[@]} - 1))
     local assets
 
@@ -1138,7 +1251,7 @@ ManageGithubReleaseAssets() {
             rm -f $filelist_txt
         fi
 
-        ManualCheckOfAssets deletion
+        ManualCheckOfAssets deletion assets
 
         # Now manage new assets.
 
@@ -1178,7 +1291,12 @@ ManageGithubReleaseAssets() {
 
         AssetCmdLast add-release-assets "$tag" "${assets[@]}"
 
-        ManualCheckOfAssets addition
+        if [ "$tag" = "${RELEASE_TAGS[$last_tag]}" ] ; then
+            sleep 1
+            break
+        fi
+
+        ManualCheckOfAssets addition assets
     done
 }
 

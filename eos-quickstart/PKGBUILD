@@ -1,0 +1,25 @@
+pkgname=eos-quickstart
+pkgver=1.1
+pkgrel=2
+pkgdesc="An application for getting a quick start with installing packages"
+arch=('any')
+license=('GPL3')
+depends=('qt6-base' 'qt6-declarative' 'polkit')
+optdepends=('konsole' 'gnome-terminal' 'xfce4-terminal' 'xterm' 'alacritty' 'lxterminal')
+makedepends=('git' 'cmake' 'qt6-tools')
+backup=(etc/eos-quickstart.conf)
+source=(https://github.com/endeavouros-team/eos-quickstart/archive/refs/tags/${pkgver}.tar.gz)
+sha256sums=('523ed0da8a5971d4c3e3b5464b87e832a8fcf20fc48b0a48d4258723ba7ff9d7')
+
+build() {
+    cd "$srcdir/$pkgname-$pkgver"
+    cmake -B build -S . -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE='Release'
+    make -C build
+}
+
+package() {
+    cd "$srcdir/$pkgname-$pkgver"
+    make -C build DESTDIR="$pkgdir" install
+
+    install -Dm0644 "$srcdir/$pkgname-$pkgver/eos-quickstart.conf" "$pkgdir/etc/eos-quickstart.conf"
+}

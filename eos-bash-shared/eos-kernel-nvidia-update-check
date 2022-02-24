@@ -15,8 +15,12 @@ Main()
     lsmod | grep nvidia >/dev/null || exit 0                # NVIDIA not is use
 
     # stop if any nvidia dkms driver is installed
+    local known_nvidia_dkms_drivers=(
+        nvidia-dkms
+        $(yay -Ssq nvidia xx-dkms | grep -Pv '430|340' | sort -r | head -n2)  # 2 latest from AUR
+    )
     local pkg
-    for pkg in nvidia-dkms nvidia-390xx-dkms   # nvidia-340xx-dkms
+    for pkg in "${known_nvidia_dkms_drivers[@]}"
     do
         /usr/bin/pacman -Qq $pkg >& /dev/null && exit 0
     done

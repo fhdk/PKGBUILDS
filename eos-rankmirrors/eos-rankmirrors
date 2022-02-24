@@ -4,9 +4,6 @@
 # Simple ranking of mirrors for the EndeavourOS mirrorlist.
 #
 
-source /usr/share/endeavouros/scripts/eos-script-lib-yad || return 1
-export -f eos_GetArch
-
 echo2()   { echo "$1" >&2 ; }
 printf2() { printf "$@" >&2 ; }
 
@@ -38,15 +35,18 @@ ShowArray() {
     done
 }
 
-RankPerTime() {
-    # latest_ml : in     # servers not commented!
-    # result    : out
+SortMirrors() {
+    local latest_ml="$1"
+    local sortopts="$2"
+    local marr mirror m m2
 
-    readarray -t result <<< $(/usr/bin/rankmirrors -t --max-time 5 --repo endeavouros $latest_ml | /usr/bin/tail -n +4)
-    # - $result will contain an array of lines like:
-    #      mirror : time
-    # - "time" can be "unreachable", and that line will be in the end of array
-    # - $result is sorted based on time, fastest first
+    readarray -t marr <<< $(grep "^Server = " $latest_ml)
+    for mirror in "${marr[@]}" ; do
+        m=$(echo "$mirror" | awk '{print $3}')                    # mirror value (with variables)
+        verbose "$m"
+        m2=$(echo "$m" | sed 's|/$repo/$arch$||')                 # mirror url (without variables)
+        GetUpdateNumberAndTime "$m2/state" "$m"                   # update number from "state" and its fetch time
+    done | LC_ALL=C sort -g $sortopts
 }
 
 RankPerAge() {
@@ -54,7 +54,7 @@ RankPerAge() {
     # result    : out
     local repo=endeavouros
     local arch=$(eos_GetArch)
-    local mirror m m2 nr_time
+    local mirror m m2
     local marr
     local sortopts=""
     local sort_rate="-k3,3 -k2r,2"
@@ -71,16 +71,7 @@ RankPerAge() {
             ;;
     esac
 
-    readarray -t marr <<< $(grep "^Server = " $latest_ml)
-
-    readarray -t result <<< $(
-        for mirror in "${marr[@]}" ; do
-            m=$(echo "$mirror" | /usr/bin/awk '{print $3}')           # mirror value (with variables)
-            verbose "$m"
-            m2=$(echo "$m" | /usr/bin/sed 's|/$repo/$arch$||')        # mirror url (without variables)
-            GetUpdateNumberAndTime "$m2/state" "$m"                   # update number from "state" and its fetch time
-        done | LC_ALL=C /usr/bin/sort -g $sortopts
-    )
+    readarray -t result <<< $(SortMirrors "$latest_ml" "$sortopts")
 }
 
 GetUpdateNumberAndTime() {
@@ -88,28 +79,82 @@ GetUpdateNumberAndTime() {
     local mirror="$2"
     local tmpfile="$HOME/.eos-rank-state.123456"
     local result=0
+    local retcode=0
     local time
     local nr
+    local low_limit=999999    # use a very high number!
 
-    time=$(curl -Lsm $timeout -w "%{time_total}" "$url" -o"$tmpfile")
-    result=$?
-    case "$result" in
+    [ -n "$reference_level" ] && low_limit=$((reference_level - 2))
+
+    time=$(curl --fail -Lsm $timeout -w "%{time_total}" "$url" -o"$tmpfile")
+    retcode=$?
+    case "$retcode" in
         0)
             nr="$(cat "$tmpfile" | head -n1)"
+            rm -f "$tmpfile"
+
+            local just_testing=no                  # no=production, yes=TESTING
+
+            if [ "$just_testing" = "yes" ] ; then
+                if [ "$mirror" = 'https://ca.gate.endeavouros.com/endeavouros/repo/$repo/$arch' ] ; then
+                    nr=5555
+                fi
+            fi
+
+            if [ -n "$reference_level" ] ; then
+                if [ $nr -lt $low_limit ] ; then     # ad hoc test for the update level value in the state file
+                    echo2 "====> Fail: update level $nr too low (should be close to $reference_level): $mirror"
+                    return
+                fi
+                if [ $nr -gt $reference_level ] ; then             # ad hoc test for the update level value in the state file
+                    echo2 "====> Fail: update level $nr too high (cannot be more than $reference_level): $mirror"
+                    return
+                fi
+            fi
             result="$nr $time"
+            echo "$mirror $result"      # "mirror nr time"
             ;;
         *)
-            result=""
+            printf2 "====> Fail: no response: mirror $mirror, url $url,\n"
+            printf2 "====> Error code $retcode: '$(curl-exit-code-to-string $retcode)'\n"
+            rm -f "$tmpfile"
+            return $retcode
             ;;
     esac
+}
 
-    rm -f "$tmpfile"
-    
-    if [ -n "$result" ] ; then
-        echo "$mirror $result"      # "mirror nr time"
-    else
-        echo2 "====> Fail: $mirror"
+GetReferenceUpdateLevel() {
+    local refroot="https://mirror.alpix.eu/endeavouros/repo"
+    local result=$(GetUpdateNumberAndTime "$refroot/state" "$refroot"/'$repo/$arch')
+    [ -n "$result" ] || exit 0
+    reference_level=$(echo "$result" | awk '{print $2}')
+}
+
+FetchLatestMirrorlist() {
+    # Grab endeavouros-mirrorlist from the package cache, or fetch it from github/gitlab.
+
+    local pkg=$(ls -1 /var/cache/pacman/pkg/${pkgname}-*.zst 2>/dev/null | tail -n1)
+    if [ -n "$pkg" ] ; then
+        # the package exists in the cache
+        local cachev=$(echo "$pkg" | sed 's|.*list-\(.*\)-any.*|\1|')
+        local installedv=$(pacman -Q $pkgname | awk '{print $2}')
+        if [ "$cachev" = "$installedv" ] ; then
+            echo2 "Extracting $pkg ..."
+            tar --extract -O -f "$pkg" etc/pacman.d/endeavouros-mirrorlist > $latest_ml
+            return
+        fi
     fi
+    # package not in cache or installed package version is not the same as in cache
+    local code=0
+    local url="$(eos-github2gitlab --keep-master "https://raw.githubusercontent.com/endeavouros-team/PKGBUILDS/master/$pkgname/$pkgname")"
+    echo2 "Fetching $url ..."
+    curl --fail -Lsm $timeout -o $latest_ml $url || code=$?
+    case "$code" in
+        0) ;;
+        *) echo2 "cannot fetch EndeavourOS mirrorlist info (curl error code $code)."
+           exit 0
+           ;;
+    esac
 }
 
 SimpleRank() {
@@ -121,26 +166,26 @@ SimpleRank() {
     # - the ranked mirrorlist
 
     local pkgname=endeavouros-mirrorlist
-    local url="https://raw.githubusercontent.com/endeavouros-team/PKGBUILDS/master/$pkgname/$pkgname"
     local result
 
-    latest_ml=$(/usr/bin/mktemp) ; delete_at_end+=("$latest_ml")
+    latest_ml=$(mktemp /tmp/tmp.dF3784XXXXX) ; delete_at_end+=("$latest_ml")
 
-    echo2 "Fetching the latest available endeavouros-mirrorlist ..."
-    /usr/bin/curl -Lsm 5 -o $latest_ml $url || DIE "cannot fetch EndeavourOS mirrorlist info!"
+    FetchLatestMirrorlist
+
+    if [ -n "$ignored_mirrors" ] ; then
+        cat $latest_ml | grep -Pv "$ignored_mirrors" > $latest_ml.tmp
+        rm -f $latest_ml
+        mv $latest_ml.tmp $latest_ml
+    fi
 
     rm -f $latest_ml.orig
     mv $latest_ml $latest_ml.orig
     delete_at_end+=("$latest_ml.orig")
-    /usr/bin/cat $latest_ml.orig | /usr/bin/sort | /usr/bin/uniq > $latest_ml
+    cat $latest_ml.orig | grep "^Server[ ]*=" | sort | uniq > $latest_ml
 
     # $result will contain an array of lines like: "mirror update-ordinal fetch-time"
     echo2 "Ranking EndeavourOS mirrors, please wait ..."
-    if [ "$use_rankmirrors" = "yes" ] ; then
-        RankPerTime
-    else
-        RankPerAge
-    fi
+    RankPerAge
 
     # show the original list (mirrors commented out)
     /usr/bin/cat $latest_ml.orig | /usr/bin/sed 's|^Server = |#Server = |'
@@ -159,25 +204,64 @@ SimpleRank() {
         break
     done | /usr/bin/column -t | /usr/bin/sed 's|^|# |'
 
-    # this is the actual ranked result
-    printf "\n# EndeavourOS mirrorlist:\n"
+    # This is the actual ranked result.
+
+    echo ""
+    echo "#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+    echo "# EndeavourOS mirrorlist:"
+    echo "#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+
+    # Option --prefer takes precedence over variable ALWAYS_FIRST_EOS_MIRRORS when both are used.
+
+    if [ -n "$preferred_mirrors" ] ; then
+        UserAddedMirrors "$preferred_mirrors"
+    fi
+
+    # Example configuration:
+    #    ALWAYS_FIRST_EOS_MIRRORS='https://mirrors.tuna.tsinghua.edu.cn/endeavouros/repo/$repo/$arch|https://mirror.moson.org/endeavouros/repo/$repo/$arch'
+
+    if [ -n "$ALWAYS_FIRST_EOS_MIRRORS" ] ; then
+        UserAddedMirrors "$ALWAYS_FIRST_EOS_MIRRORS"
+    fi
+
     ShowArray "${result[@]}" | /usr/bin/awk '{print $1}' | /usr/bin/sed 's|^|Server = |'
+    echo "#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+}
+
+UserAddedMirrors() {
+    local mirrors="$1"    # a list of strings separated by '|' (pipe) chars
+    local mirror
+
+    echo "# user added mirrors >>>"
+    for mirror in $(echo "$mirrors" | tr '|' ' ') ; do
+        echo "User added: $mirror" >&2
+        echo "Server = $mirror"
+    done
+    echo "# user added mirrors <<<"
 }
 
 WriteSystemMirrorlist() {
     local eos="$1"
     local new="$2"
     local bak="$eos.$(date +%Y.%m.%d-%H.%M.%S)"
+    local eosranked="$eos$ranked_suffix"
+    local cmd=""
 
-    printf2 "\nMoving old mirrorlist to %s.\n" "$bak"
-    printf2 "Writing new mirrorlist to %s.\n" "$eos"
-    $EOS_ROOTER "mv $eos $bak ; mv $new $eos ; chown root:root $eos ; chmod 0644 $eos"
+    if [ "$EOS_AUTO_MIRROR_RANKING" = "yes" ] || [ "$hook_rank" = "no" ] ; then
+        printf2 "\nMoving old EndeavourOS mirrorlist to %s.\n" "$bak"
+        printf2 "Writing new ranked EndeavourOS mirrorlist to %s.\n" "$eos"
+        $EOS_ROOTER "mv $eos $bak ; mv $new $eos ; chown root:root $eos ; chmod 0644 $eos"
+    else
+        printf2 "\nWriting new ranked EndeavourOS mirrorlist to %s.\n" "$eosranked"
+        $EOS_ROOTER "mv $new $eosranked ; chown root:root $eosranked ; chmod 0644 $eosranked"
+    fi
 }
 
 Options() {
     local opts
+    local longopts="verbose,help,_help_,no-save,timeout:,sort:,hook-rank,ignore:,prefer:"
 
-    opts=$(getopt -o=hnt: --longoptions verbose,help,_help_,no-save,timeout:,sort: --name "$progname" -- "$@")
+    opts=$(getopt -o=hnt: --longoptions $longopts --name "$progname" -- "$@")
     case "$?" in
         0) ;;
         *) DIE "getopt detected unsupported option, cannot continue." ;;
@@ -208,6 +292,25 @@ Options:
   -n
              Don't save the generated mirrorlist.
 
+  --ignore '<wordlist>'
+             Mirrors to be ignored from the result.
+             This is useful for e.g. leaving out non-functional mirrors.
+             The <wordlist> is a list of words separated by a pipe '|' character.
+             Each word should be a unique part of a mirror address.
+             Note that the list should be enclosed in single or double quotes
+             if it includes more than one word.
+             Example:
+                 eos-rankmirrors --ignore='funami|pizza'
+
+  --prefer '<list-of-mirrors>'
+             List of preferred mirror addresses.
+             Adds given mirror addresses as the first in the EndeavourOS mirrorlist.
+             The <list-of-mirrors> is a list of mirror addresses separated by
+             a pipe '|' character.
+             Note that the list must be enclosed in single quotes.
+             Example:
+                 eos-rankmirrors --prefer='https://endeavour.remi.lu/repo/\$repo/\$arch'
+
   --verbose
              Show more detailed output.
 
@@ -223,12 +326,20 @@ EOF
 
             --sort)
                 sort="$2" ; shift ;;
+            --ignore)
+                ignored_mirrors="$2" ; shift ;;
+            --prefer)
+                preferred_mirrors="$2" ; shift ;;
             --timeout | -t)
                 timeout="$2" ; shift ;;
             --verbose)
                 verbose=yes ;;
-            --no-save)
+            --no-save | -n)
                 save=no
+                ;;
+            --hook-rank)
+                hook_rank=yes
+                
                 ;;
             --)
                 shift ; break ;;
@@ -237,38 +348,61 @@ EOF
     done
 }
 
+PackageThatOwnsApp() {
+    local app="$1"
+    LANG=C pacman -Qo "$app" | awk '{print $5}'
+}
+
 Main()
 {
     local progname="$(basename "$0")"
     local pkgname=endeavouros-mirrorlist
-    local eos=/etc/pacman.d/$pkgname
+    local mlfolder=/etc/pacman.d
+    local eos=$mlfolder/$pkgname
     local new=""
     local latest_ml=""
     local delete_at_end=()
     local arg
-    local timeout_default=2                   # in seconds
     local sort_default=age                    # age or rate
-    local use_rankmirrors=no
     local save=yes
-
-    # option-related variables
-    local verbose=no
-    local timeout=$timeout_default
-    local sort=$sort_default
-
-    Options "$@"
+    local hook_rank=no
+    local ranked_suffix=".pacnew"             # was: ".ranked"  !!!
+    local ignored_mirrors=""
+    local preferred_mirrors=""
+    local reference_level=""
 
     if [ ! -r "$eos" ] ; then               # this test is not really needed...
         DIE "no local mirrorlist found, please install package '$pkgname'."
     fi
-    if [ "$use_rankmirrors" = "yes" ] && [ ! -x /usr/bin/rankmirrors ] ; then
-        DIE "ranking failed because package 'pacman-contrib' is not installed."
+
+    source /usr/share/endeavouros/scripts/eos-script-lib-yad || return 1
+    export -f eos_GetArch
+
+    local conf=/etc/eos-rankmirrors.conf
+    source $conf || DIE "Config file $conf does not exist!"
+
+    # option-related variables
+    local verbose=no
+    local sort=$sort_default
+    local timeout_default="$EOS_AUTORANK_TIMEOUT"                  # in seconds
+    [ -n "$timeout_default" ] || timeout_default=30
+    local timeout=$timeout_default
+
+    if [ -x /usr/bin/eos-connection-checker ] ; then
+        eos-connection-checker || DIE "internet connection not available!"
+    else
+        echo2 "WARNING: eos-connection-checker is not available, cannot verify internet connection."
+        echo2 "         Package '$(PackageThatOwnsApp eos-connection-checker)' is not installed?"
     fi
+
+    GetReferenceUpdateLevel
+
+    Options "$@"
 
     new=$(/usr/bin/mktemp) ; delete_at_end+=("$new")
 
     SimpleRank > $new
-    cat $new
+    [ "$hook_rank" = "no" ] && cat $new
 
     if [ -z "$(grep "^Server = " $new)" ] ; then
         DIE "ranking failed, no mirrors found!"

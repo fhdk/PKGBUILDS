@@ -122,7 +122,7 @@ export -f eos_yad_WARN_debug
 
 
 Welog() {
-    [ -d /home/$EOS_LIVEUSER ] && echo "$progname: " "$@" >> $INSTALL_LOG_FILE
+    [ -d /home/$EOS_LIVEUSER ] && echo "$PROGNAME: " "$@" >> $INSTALL_LOG_FILE
 }
 export -f Welog
 
@@ -398,15 +398,9 @@ INSTALL() {
       --image=$image
       --text="<b>$(ltr ins_text)</b>" --text-align=left
 
-      --field=" $(ltr ins_start)!$system_software_install!$(ltr ins_starttip)":fbtn                 "eos-install-mode-run-calamares '$lang' '' FALSE TRUE"   # pacman log by default
-  )
-  #if [ "$EOS_COMMUNITY_EDITIONS" = "experimental" ] ; then
-      tabcontents+=(
-          --field=" $(ltr install_community)!$system_software_install!$(ltr install_community_tip)":fbtn "eos-install-mode-run-calamares '$lang' community TRUE TRUE"  # show all logs
-      )
-  #fi
-  tabcontents+=(
-      --field=" $(ltr after_install_um)!$reflector_simple!$(ltr after_install_umtip)":fbtn          reflector-simple
+      --field=" $(ltr ins_start)!$system_software_install!$(ltr ins_starttip)":fbtn                  "eos-install-mode-run-calamares '$lang' ''"
+      --field=" $(ltr install_community)!$system_software_install!$(ltr install_community_tip)":fbtn "eos-install-mode-run-calamares '$lang' community"
+      --field=" $(ltr after_install_um)!$reflector_simple!$(ltr after_install_umtip)":fbtn           reflector-simple
   )
 
   ShowChangeResoButton
@@ -622,12 +616,10 @@ AfterInstall() {
       --field=" $(ltr after_install_ew2)!preferences-desktop-wallpaper!$(ltr after_install_ewtip2)":fbtn  'eos-wallpaper-set'
       --field=" $(ltr after_install_more_wall)!preferences-desktop-wallpaper!$(ltr after_install_more_wall_tip)":fbtn  'RunInTerminal eos-download-wallpapers'
   )
-  if (IsR8168Card) ; then
-      if [ -n "$(lsmod | grep r8169)" ] ; then
-          tabcontents+=(
-              --field=" Wired net issues$_question Try r8168 driver$_exclamation!$system_software_update!Changing to r8168 driver.":fbtn "ethernet_use_8168"
-          )
-      fi
+  if IsR8168Card ; then
+      tabcontents+=(
+          --field=" $(ltr after_install_r8168)!$system_software_update!$(ltr after_install_r8168_tip)":fbtn "ethernet_toggle_r8168_r8169"
+      )
   fi
   tabcontents+=(--field=" $(ltr ins_logtool)!face-worried!$(ltr ins_logtooltip)":fbtn  "eos-log-tool" )
   case "$(eos_yad_GetDesktopName)" in
@@ -678,11 +670,11 @@ DailyAssistant() {
   tabcontents+=(
       --field=" $(ltr ins_logtool)!face-worried!$(ltr ins_logtooltip)":fbtn  "eos-log-tool"
   )
-  IsInstalled eos-apps-info && {
-      tabcontents+=(
-	  --field=" EndeavourOS apps help!endeavouros-icon!Show manual pages of EndeavourOS apps":fbtn "/usr/bin/eos-apps-info"
-      )
-  }
+  #IsInstalled eos-apps-info && {
+  #    tabcontents+=(
+  #        --field=" EndeavourOS apps help!endeavouros-icon!Show manual pages of EndeavourOS apps":fbtn "/usr/bin/eos-apps-info"
+  #    )
+  #}
 
   # General app browsing buttons:
   if [ "$(eos_GetArch)" = "armv7h" ] ; then
@@ -699,22 +691,29 @@ DailyAssistant() {
       --field=" $(ltr daily_assist_apps)!!$(ltr daily_assist_apps_tip)":fbtn "$_WELCOME_BROWSER https://wiki.archlinux.org/title/List_of_applications"
   )
 
-  local DEname="$(eos_GetDeOrWm)"
-  case "$(eos_yad_GetDesktopName)" in
-      XFCE)         DEname=Xfce;;
-      BUDGIE)       DEname=Budgie;;
-      CINNAMON)     DEname=Cinnamon;;
-      LXQT)         DEname=LXQt;;
-      I3)           DEname=i3;;
-      BSPWM)        DEname=bspwm;;
-      SWAY)         DEname=sway;;
-      GNOME3)       DEname=GNOME;;
-      GNOME|KDE|MATE) ;;
-      *)            DEname="";;
-  esac
-  if [ -n "DEname" ] ; then
+  local DE=""
+  eos_yad__detectDE          # lowercase
+
+  if [ 0 -eq 1 ] ; then
+      # Adjust DE names for the Arch web page! Note: all could be lower case...
+      case "$DE" in
+          xfce)         DE=Xfce;;
+          budgie)       DE=Budgie;;
+          cinnamon)     DE=Cinnamon;;
+          lxqt)         DE=LXQt;;
+          i3)           DE=i3;;
+          bspwm)        DE=bspwm;;
+          sway)         DE=sway;;
+          openbox)      DE=Openbox;;
+          qtile)        DE=Qtile;;
+          gnome3)       DE=GNOME;;
+          gnome|kde|mate) ;;
+          *)            DE="";;
+      esac
+  fi
+  if [ -n "$DE" ] ; then
       tabcontents+=(
-          --field=" $DEname: $(ltr daily_assist_DEinfo)!!$DEname: $(ltr daily_assist_DEinfo_tip)":fbtn   "$_WELCOME_BROWSER https://wiki.archlinux.org/title/$DEname"
+          --field=" $DE: $(ltr daily_assist_DEinfo)!!$DE: $(ltr daily_assist_DEinfo_tip)":fbtn   "$_WELCOME_BROWSER https://wiki.archlinux.org/title/$DE"
       )
   fi
 
@@ -812,59 +811,65 @@ AddMoreApps() {
   local handle="$1"
   local tabnum="$2"
 
-  local shown_app_buttons=0
-  local DE="$(eos_yad_GetDesktopName)"
-
-  local gufw="$(IconGrasp gufw network-firewall firewall-config)"
-  local libreoffice="$(IconGrasp libreoffice-writer)"
-  local chromium="$(IconGrasp chromium web-browser)"
-
   local tabcontents=(
       eos_yad --align-buttons --use-interp
       --plug="$handle" --tabnum="$tabnum" --form --text-align=left --columns=2
       --image=$system_software_install
   )
-  IsInstalled libreoffice-fresh || {
-      ((shown_app_buttons++))
-      tabcontents+=( --field=" LibreOffice!$libreoffice!$(ltr add_more_apps_lotip)":fbtn 'yad_Install libreoffice-fresh')
-  }
-  IsInstalled chromium || {
-      ((shown_app_buttons++))
-      tabcontents+=(--field=" $(ltr add_more_apps_ch)!$chromium!$(ltr add_more_apps_chtip)":fbtn 'yad_Install chromium')
-  }
-  IsInstalled gufw || {
-      ((shown_app_buttons++))
-      tabcontents+=(--field=" $(ltr add_more_apps_fw)!$gufw!$(ltr add_more_apps_fwtip)":fbtn 'yad_Install gufw')
-  }
+  local shown_app_buttons=0
+  local use_eos_quickstart=no
 
-  if [ "$(eos_GetArch)" != "armv7h" ] ; then
-      IsInstalled akm || {
+  [ -x /usr/bin/eos-quickstart ] && use_eos_quickstart=yes
+
+  if [ "$use_eos_quickstart" = "no" ] ; then
+      local DE="$(eos_yad_GetDesktopName)"
+      local gufw="$(IconGrasp gufw network-firewall firewall-config)"
+      local libreoffice="$(IconGrasp libreoffice-writer)"
+      local chromium="$(IconGrasp chromium web-browser)"
+      local libreoffice="libreoffice-fresh"
+
+      IsInstalled "$libreoffice" || {
           ((shown_app_buttons++))
-          tabcontents+=(--field=" $(ltr add_more_apps_akm)!$system_software_install!$(ltr add_more_apps_akmtip)":fbtn 'yad_Install akm')
+          tabcontents+=( --field=" LibreOffice fresh!$libreoffice!$(ltr add_more_apps_lotip)":fbtn "yad_Install $libreoffice")
       }
-  fi
-  IsInstalled eos-apps-info || {
-      ((shown_app_buttons++))
-      tabcontents+=(--field=" EndeavourOS apps info!$system_software_install!Show info about EndeavourOS apps":fbtn 'yad_Install eos-apps-info')
-  }
-  case "$DE" in
-    XFCE)
-        while true ; do                       # Show buttons only if none of them are installed.
-            IsInstalled blueberry && break
-            IsInstalled blueman && break
-            ((shown_app_buttons+=2))
-            local bluetooth="$(IconGrasp bluetooth)"
-            tabcontents+=(
-                --field=" $(ltr add_more_apps_bt)!$bluetooth!Blueberry":fbtn                   'yad_Install blueberry bluez-utils'
-                --field=" $(ltr add_more_apps_bt_bm)!$bluetooth!Blueman":fbtn                  'yad_Install blueman bluez-utils pulseaudio-bluetooth'
-            )
-            break
-        done
-        ;;
-  esac
+      IsInstalled chromium || {
+          ((shown_app_buttons++))
+          tabcontents+=(--field=" $(ltr add_more_apps_ch)!$chromium!$(ltr add_more_apps_chtip)":fbtn 'yad_Install chromium')
+      }
+      IsInstalled gufw || {
+          ((shown_app_buttons++))
+          tabcontents+=(--field=" $(ltr add_more_apps_fw)!$gufw!$(ltr add_more_apps_fwtip)":fbtn 'yad_Install gufw')
+      }
 
-  if (! IsEosYadInstalled) ; then
-      tabcontents+=(--field=" Yad (patched)!$(yad-tools -i yad)!Patched version of yad fixes the window height issue":fbtn "yad_Install yad-eos")
+      if [ "$(eos_GetArch)" != "armv7h" ] ; then
+          IsInstalled akm || {
+              ((shown_app_buttons++))
+              tabcontents+=(--field=" $(ltr add_more_apps_akm)!$system_software_install!$(ltr add_more_apps_akmtip)":fbtn 'yad_Install akm')
+          }
+      fi
+      #IsInstalled eos-apps-info || {
+      #    ((shown_app_buttons++))
+      #    tabcontents+=(--field=" EndeavourOS apps info!$system_software_install!Show info about EndeavourOS apps":fbtn 'yad_Install eos-apps-info')
+      #}
+      case "$DE" in
+          XFCE)
+              while true ; do                       # Show buttons only if none of them are installed.
+                  IsInstalled blueberry && break
+                  IsInstalled blueman && break
+                  ((shown_app_buttons+=2))
+                  local bluetooth="$(IconGrasp bluetooth)"
+                  tabcontents+=(
+                      --field=" $(ltr add_more_apps_bt)!$bluetooth!Blueberry":fbtn                   'yad_Install blueberry bluez-utils'
+                      --field=" $(ltr add_more_apps_bt_bm)!$bluetooth!Blueman":fbtn                  'yad_Install blueman bluez-utils pulseaudio-bluetooth'
+                  )
+                  break
+              done
+              ;;
+      esac
+
+      if (! IsEosYadInstalled) ; then
+          tabcontents+=(--field=" Yad (patched)!$(yad-tools -i yad)!Patched version of yad fixes the window height issue":fbtn "yad_Install yad-eos")
+      fi
   fi
 
   # General app browsing buttons:
@@ -874,7 +879,12 @@ AddMoreApps() {
       tabcontents+=(--field=" $(ltr add_more_apps_arch)!!$(ltr add_more_apps_done2_tip1)":fbtn "$_WELCOME_BROWSER https://www.archlinux.org/packages")
   fi
   tabcontents+=(--field=" $(ltr add_more_apps_aur)!!$( ltr add_more_apps_done2_tip2)":fbtn "$_WELCOME_BROWSER https://aur.archlinux.org/packages")
-  
+
+  if [ "$use_eos_quickstart" = "yes" ] ; then
+      ((shown_app_buttons++))
+      tabcontents+=(--field=" $(ltr add_more_apps_qs)!$EOS_WICON!$(ltr add_more_apps_qstip)":fbtn "eos-quickstart")
+  fi
+
   # Now we know if we have any apps in the install list.
 
   if [ $shown_app_buttons -eq 0 ] ; then
@@ -1101,12 +1111,9 @@ EOF
 
     case "$value" in
         disable)
-            echo "$(ltr settings_dis_contents)" | \
-                eos_yad --text-info --image=dialog-information --text="$(ltr settings_dis_text)" \
-                        --title="$(ltr settings_dis_title)" \
-                        --geometry=500x200 --wrap \
-                        --fontname="Monospace Regular 12" \
-                        --button=" $(ltr settings_dis_butt)!face-angel!$(ltr settings_dis_buttip)":0 >& /dev/null
+            eos_yad --form --image=dialog-information --text="$(ltr settings_dis_contents)" \
+                    --title="$(ltr settings_dis_title)" \
+                    --button=" $(ltr settings_dis_butt)!face-angel!$(ltr settings_dis_buttip)":11
             ;;
         check)
             grep "^Greeter=" "$WELCOME_CONFIG" 2>/dev/null | cut -d '=' -f 2
@@ -1136,32 +1143,83 @@ IsR8168Card() {
         return 0
     fi
 
-    if [ -n "$(/usr/bin/lspci | /usr/bin/grep -w Ethernet | /usr/bin/grep -w 8168)" ] ; then
-        return 0
-    else
-        return 1
+    if [ -n "$(/usr/bin/lspci | /usr/bin/grep -w "Ethernet controller" | /usr/bin/grep -w 8168)" ] ; then   # have the card?
+        if [ -n "$(lsmod | grep -Pw 'r8169|r8168')" ] ; then                                                # driver is in use?
+            return 0
+        fi
     fi
+    return 1
 }
 export -f IsR8168Card
 
-ethernet_use_8168() {
-    local cmds=""
-    cmds+="echo blacklist r8169 > /usr/lib/modprobe.d/r8168.conf"
-    cmds+="; modprobe -r r8169 2>/dev/null"
-    cmds+="; modprobe r8168"
-    cmds+="; systemctl restart NetworkManager"
-
+ethernet_toggle_r8168_r8169() {
+    local cmds=":"
+    local prompt=""
     if (! IsInstalled r8168) ; then
+        prompt="echo 'r8169 ==> r8168'"
         if (eos-connection-checker) ; then
-            cmds="pacman -S r8168; $cmds"
+            cmds+="; pacman -Syu --noconfirm r8168"
         else
-            w_WARN "sorry, cannot install r8168 because there's no internet connection."
-            return 1
+            local pkg="$(/usr/bin/ls -1 /opt/extra-drivers/r8168-*-x86_64.pkg.tar.zst 2>/dev/null)"  # may find it in /opt/extra-drivers !
+            if [ -n "$pkg" ] ; then
+                cmds="; pacman -U --noconfirm $pkg"
+            else
+                w_WARN "sorry, cannot install r8168 because there's no internet connection."
+                return 1
+            fi
         fi
+        cmds+="; modprobe -r r8169 2>/dev/null"
+        cmds+="; modprobe r8168 2>/dev/null"
+    else
+        prompt="echo 'r8168 ==> r8169'"
+        cmds+="; pacman -Rsn --noconfirm r8168"
+        cmds+="; modprobe -r r8168 2>/dev/null"
+        cmds+="; modprobe r8169 2>/dev/null"
     fi
-    RunInTerminal "$EOS_ROOTER '$cmds'"
+    cmds+="; systemctl restart NetworkManager"
+    RunInTerminal "$prompt ; $EOS_ROOTER '$cmds'"
 }
-export -f ethernet_use_8168
+export -f ethernet_toggle_r8168_r8169
+
+R8168check_at_install() {
+    local card8168="$(lspci -vnn | grep -w Ethernet | grep -w Realtek | grep -w 8168 )"
+    if [ -n "$card8168" ] ; then
+        # we have 8618 card
+        local cardid="$(echo "$card8168" | sed 's|.*\[\([^]]*\)\].*|\1|')"    # e.g. "10ec:8168"
+        case "$cardid" in
+            # 10ec:8168) ;;                # card id is known to work with kernel's r8169 module
+            *)
+                # Package r8168 is available in /opt/extra-drivers.
+                local txt=""
+                txt+="Your Ethernet card is set to use the kernel driver r8169 by default.\n"
+                txt+="In some rare cases the r8168 driver works better.\n"
+                txt+="If your Ethernet connection has problems with r8169, you can use the r8168 driver.\n"
+                local cmd=(
+                    eos_yad
+                    --form
+                    --image=dialog-question
+                    --title="Select the driver for the Realtek 8168 Ethernet card"
+                    --text="$txt"
+                    --button="r8168":1
+                    --button="r8169 (default)":3
+                )
+                "${cmd[@]}"
+                case "$?" in
+                    1)
+                        # use r8168 which is stored at /opt/extra-drivers
+                        local pkg="$(/usr/bin/ls -1 /opt/extra-drivers/r8168-*-x86_64.pkg.tar.zst 2>/dev/null)"
+                        if [ -n "$pkg" ] ; then
+                            sudo pacman -U --noconfirm $pkg
+                            sudo modprobe -r r8169 2>/dev/null
+                            sudo modprobe r8168 2>/dev/null
+                            sudo systemctl restart NetworkManager
+                        fi
+                        ;;
+                esac
+                ;;
+        esac
+    fi
+}
 
 MagicId() {
     local ENDEAVOUROS_TEAM=https://raw.githubusercontent.com/endeavouros-team
@@ -1191,13 +1249,13 @@ MagicId() {
         echo "Moving existing $target to $target.$time" >&2
         mv $target $target.$time
     fi
-    if (! wget -q -O $target "$url") ; then
+    if (! Wget2Curl -q -O $target "$url") ; then
         echo "Sorry, URL '$url' not found. " >&2
         [ -r $target.$time ] && mv $target.$time $target
         return 1
     fi
     case "$id" in
-        ma) if (! wget -q "$ENDEAVOUROS_TEAM/sandbox/master/pkg/pkglist_install.sh") ; then
+        ma) if (! Wget2Curl -q -O pkglist_install.sh "$ENDEAVOUROS_TEAM/sandbox/master/pkg/pkglist_install.sh") ; then
                 echo "Warning: cannot fetch pkglist_install.sh from sandbox" >&2
                 return 1
             fi
@@ -1226,15 +1284,19 @@ EndProgress() {
 }
 
 VboxGuestEnable() {
-    if [ -n "$(systemctl status vboxservice 2>/dev/null | grep "inactive (dead)")" ] ; then
-        local label="$(ltr after_install_vbox1)"
-        local msg1="$(ltr after_install_vbox2)"
-        local cmd="systemctl enable --now vboxservice.service"
-        local msgvb="$msg1\n<b>$label</b>"
-        local icon=user-info
-        eos_yad --form --title="Info" --text="$msgvb" --image=$icon --button=yad-quit:0 &
-        tabcontents+=(--field=" $label!preferences-system!$cmd":fbtn "RunInTerminal $cmd")
-    fi
+    case "$(device-info --vm)" in
+        virtualbox)
+            if [ -n "$(systemctl status vboxservice 2>/dev/null | grep "inactive (dead)")" ] ; then
+                local label="$(ltr after_install_vbox1)"
+                local msg1="$(ltr after_install_vbox2)"
+                local cmd="systemctl enable --now vboxservice.service"
+                local msgvb="$msg1\n<b>$label</b>"
+                local icon=user-info
+                eos_yad --form --title="Info" --text="$msgvb" --image=$icon --button=yad-quit:0 &
+                tabcontents+=(--field=" $label!preferences-system!$cmd":fbtn "RunInTerminal $cmd")
+            fi
+            ;;
+    esac
 }
 
 KillExtraYad() {
@@ -1253,6 +1315,7 @@ Options:
                   X value syntax is the same as in 'sleep'.
 --enable | -f     Enable this $PRETTY_PROGNAME app.
 --disable         Disable this $PRETTY_PROGNAME app.
+--once            Enable $PRETTY_PROGNAME once even if disabled.
 --version         Show the version of this app.
 --lang=X          Use language X on the user interface.
 --changelog       Show the changelog of this package.
@@ -1295,6 +1358,51 @@ export -f Usage
 #                  to install. Package names are listed as one package name per line.
 #                  Empty lines and comments (lines starting with character #) are allowed.
 
+CheckUserPkglist() {
+    local userlistfile="/home/$EOS_LIVEUSER/user_pkglist.txt"
+
+    if [ -r "$userlistfile" ] ; then
+        # Remove comments (sed), empty lines (grep), and trim lines from spaces (sed):
+        local user_pkgs=$(cat "$userlistfile" | sed 's|\([^#]*\)#.*|\1|' | grep -Pv "^[ \t]*$" | sed -e 's|^[ \t]*||' -e 's|[ \t]*$||')
+        local up up2
+        local failed=()
+        local aur=()
+        local has_spaces=no
+        local txt=""
+
+        # allow only one pkgname per line
+        readarray -t user_pkgs <<< $(echo "$user_pkgs")
+
+        for up in "${user_pkgs[@]}" ; do
+            [ -n "$up" ] || continue
+            if ! pacman -Si "$up" >& /dev/null ; then
+                if [ "$up" != "$(echo "$up" | sed 's|[ \t]||g')" ] ; then
+                    has_spaces=yes
+                fi
+                up2="\t'$up'"
+                if yay -Sia "$up" >& /dev/null ; then
+                    aur+=("$up2")
+                else
+                    failed+=("$up2")
+                fi
+            fi
+        done
+
+        if [ -n "$failed" ] ; then
+            txt="The following package names listed in <b>$userlistfile</b> do not exist:\n$(printf "<tt>%s</tt>\n" "${failed[@]}")\n\n"
+        fi
+        if [ -n "$aur" ] ; then
+            txt+="AUR packages listed in <b>$userlistfile</b> are not supported:\n$(printf "<tt>%s</tt>\n" "${aur[@]}")\n\n"
+        fi
+        if [ "$has_spaces" = "yes" ] ; then
+            txt+="Note that only one package name per line is allowed.\n"
+        fi
+        if [ -n "$txt" ] ; then
+            eos_yad --form --title="Error" --text="$txt" --image=dialog-error --button=yad-quit:1
+            exit 1
+        fi
+    fi
+}
 
 StartHere() {
     local arg lang
@@ -1304,16 +1412,31 @@ StartHere() {
     local pb_percent=0
     local show_progress_bar=no   # was: yes
     local testing=no
+    local allow_run_if_disabled=no            # yes = allow run even if disabled
 
     local welcome_own_commands=()
     local activate_own_commands_tab="no"
     local columns_for_own_commands="2"
     local show_predefined_buttons_at_own_commands="yes"
 
+    export show_installer=no    # explicitly show the installer, for testing only
+    for arg in "$@" ; do
+        case "$arg" in
+            --installer) export show_installer=yes ;;
+        esac
+    done
+
+    local is_installing
+    IsInstalling
+    test $? -eq 0 && is_installing=yes || is_installing=no
+
     [ -z "$EOS_FILESERVER_SITE" ] && EOS_FILESERVER_SITE="gitlab"
+    if [ "$is_installing" = "yes" ] ; then
+        EOS_FILESERVER_SITE="$(eos-select-file-server)"
+    fi
+    export EOS_FILESERVER_SITE
 
     export WELCOME_ARGS="$*"
-    export EOS_FILESERVER_SITE
 
     # common button icons
     local user_info="$(IconGrasp user-info)"
@@ -1351,6 +1474,10 @@ StartHere() {
 
     KillExtraYad > /tmp/yad-zombies.log
 
+    if [ "$is_installing" = "yes" ] ; then
+        CheckUserPkglist
+    fi
+
     ShowProgress Processing...
 
     local WELCOME_CONFIG="$HOME/.config/EOS-greeter.conf"     # "Welcome" used to be "Greeter" ...
@@ -1371,10 +1498,8 @@ StartHere() {
     fi
     export EOS_WELCOME_ACTIVE_TAB_NUMBER
 
-    export show_installer=no    # explicitly show the installer, for testing only
     export user_pkglist_url=""
     local start_delay=0
-    local is_installing
     local _NOTEBOOK_TITLE="$PRETTY_PROGNAME v$PROG_VERSION"        # main window title
 
     #local netlog=0
@@ -1384,8 +1509,9 @@ StartHere() {
             --help|-h) WelcomeHelp ; return ;;
             --enable|-f) WelcomeSettings enable ;;
             --disable)   WelcomeSettings disable ; return ;;
+            --once) allow_run_if_disabled=yes ;;
             --startdelay=*) start_delay="${arg#*=}" ;;
-            --installer) export show_installer=yes ;;
+            --installer) ;;                                             # already handled!
             #--pkglist=*) export user_pkglist_url="${arg#*=}" ;;        # only for online installs currently
             --version) echo "$PROG_VERSION" >&2 ; return ;;
             --lang=* | --tr-prefer=* | --tr-engine=* | --id=* | --no-progress) ;; # already handled!
@@ -1411,13 +1537,14 @@ StartHere() {
 
     CreateNotebookCommands
 
-    if [ "$(WelcomeSettings check)" != "enable" ] ; then
+    if [ "$(WelcomeSettings check)" != "enable" ] && [ "$allow_run_if_disabled" = "no" ]; then
         ltr2 welcome_disabled
         return
     fi
 
-    IsInstalling
-    test $? -eq 0 && is_installing=yes || is_installing=no
+    if [ "$is_installing" = "yes" ] ; then
+        R8168check_at_install
+    fi
 
     if [ "$start_delay" != "0" ] ; then
         ShowProgress "Sleeping..."
@@ -1445,10 +1572,12 @@ StartHere() {
         fi
     else
         eos-kbd-set
-        if [ -r /etc/pacman.d/mirrorlist ] && [ ! -r /tmp/mirrorlist.bu ] ; then
-            cp /etc/pacman.d/mirrorlist /tmp/mirrorlist.bu  # to be checked by update-mirrorlist
-        else
-            Welog "Warning: cannot make a backup of mirrorlist!"
+        if [ ! -r /tmp/mirrorlist.bu ] ; then
+            if [ -r /etc/pacman.d/mirrorlist ] ; then
+                cp /etc/pacman.d/mirrorlist /tmp/mirrorlist.bu  # to be checked by update-mirrorlist
+            else
+                Welog "Warning: cannot make a backup of mirrorlist!"
+            fi
         fi
         #if [ -z "$(grep '=/usr/share/endeavouros/scripts/welcome' /home/$EOS_LIVEUSER/.config/xfce4/panel/launcher-*/*.desktop)" ] ; then
         #    xfce4-panel --add=launcher $EOS_SCRIPTS_DIR/welcome-panel.desktop
@@ -1527,7 +1656,9 @@ StartHere() {
 
     case "$result" in
         5) WelcomeSettings disable ;;
-        0|252) sleep 0.5 ; WelcomeSettings enable ;;
+        0) sleep 0.5 ; WelcomeSettings enable ;;
+        252) ;;
+        # 0|252) sleep 0.5 ; WelcomeSettings enable ;;
         *)
             case "$result" in
                 143) comment="   # likely caused by restarting the Welcome app" ;;

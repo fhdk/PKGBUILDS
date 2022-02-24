@@ -298,10 +298,15 @@ _tr_add2 daily_assist_apps_tip       "Applications triées par categorie"
 _tr_add2 after_install_vbox1         "Activer outils invités VirtualBox"
 _tr_add2 after_install_vbox2         "Pour activer les outils invités de VirtualBox, selectionner l'onglet <b>Post-Installation</b> et cliquer sur le bouton"
 
-# 17-juin-2021
-_tr_add2 after_install_r8168         "Problème ethernet $_question Enlever r8168 $_exclamation"
-_tr_add2 after_install_r8168_tip     "Enlever le paquet <b>r8168</b> pourrait corriger des problèmes de connexion filaire (redémarrage requis)"
+# 17-juin-2021 / 14-déc-2021
+_tr_add2 after_install_r8168         "Réseau filaire issue$_question  Basculer pilote r8168 et r8169 $_exclamation"
+_tr_add2 after_install_r8168_tip     "Basculer entre les pilotes r8168 et r8169 (puis redémarrer)"
 
 # 08-octobre-2021
-_tr_add2 daily_assist_DEinfo         "information"                                         # assume prefix "DE:", e.g.: "Xfce: information"
-_tr_add2 daily_assist_DEinfo_tip     "plus d'informations sur cet environnement de bureau/gestionnaire de fen"  # assume prefix "DE:", e.g.: "Xfce: more information ..."
+_tr_add2 daily_assist_DEinfo         "Information"                                         # assume prefix "DE:", e.g.: "Xfce: information"
+_tr_add2 daily_assist_DEinfo_tip     "Plus d'informations sur cet environnement de bureau/gestionnaire de fen"  # assume prefix "DE:", e.g.: "Xfce: more information ..."
+
+# 16-fevrier-2022
+_tr_add2 add_more_apps_qs            "Choisir applications populaires à installer"                      # runs eos-quickstart
+_tr_add2 add_more_apps_qstip         "Choisissez des applications populaires et installez-les"
+

@@ -34,7 +34,7 @@ _question='&#63;'      # '?'
 ###################### Now the actual strings to be translated: ######################
 # func   <placeholder>         "string"
 
-_tr_add2 welcome_disabled      "$PRETTY_PROGNAME app is disabled. To start it anyway, use option --enable."
+_tr_add2 welcome_disabled      "$PRETTY_PROGNAME app is disabled. To start it anyway, use option --enable (temporarily: --once)."  # changed 2022-Feb-21
 
 _tr_add2 butt_later            "See you later"
 _tr_add2 butt_latertip         "Keep $PRETTY_PROGNAME enabled"
@@ -127,7 +127,7 @@ _tr_add2 add_more_apps_bt_bm   "Bluetooth (blueman) for Xfce"
 
 ####################### NEW STUFF AFTER THIS LINE:
 
-_tr_add2 settings_dis_contents   "To run $PRETTY_PROGNAME again, start a terminal and run: $PROGNAME --enable"
+_tr_add2 settings_dis_contents   "To run $PRETTY_PROGNAME again, start a terminal and run:\n<tt>   $PROGNAME --enable</tt>\n"  # slightly changed 2021-Dec-21
 _tr_add2 settings_dis_text       "Re-enabling $PRETTY_PROGNAME:"
 _tr_add2 settings_dis_title      "How to re-enable $PRETTY_PROGNAME"
 _tr_add2 settings_dis_butt       "I remember"
@@ -303,9 +303,14 @@ _tr_add2 after_install_vbox1         "Enable VirtualBox Guest utilities"
 _tr_add2 after_install_vbox2         "To enable VirtualBox Guest utilities, select the <b>AfterInstall</b> tab and click button "
 
 # 2021-Jun-17
-_tr_add2 after_install_r8168         "Ethernet issue$_question Remove r8168$_exclamation"
-_tr_add2 after_install_r8168_tip     "Removing package <b>r8168</b> may fix failing wired connection (reboot required)"
+_tr_add2 after_install_r8168         "Wired net issue$_question Toggle r8168 and r8169 driver$_exclamation"    # changed 2021-Dec-14 !!
+_tr_add2 after_install_r8168_tip     "Toggle between r8168 and r8169 drivers (reboot may be needed)"           # changed 2021-Dec-14 !!
 
 # 2021-Oct-08
 _tr_add2 daily_assist_DEinfo         "information"                                         # assume prefix "DE:", e.g.: "Xfce: information"
 _tr_add2 daily_assist_DEinfo_tip     "more information about this Desktop/Window Manager"  # assume prefix "DE:", e.g.: "Xfce: more information ..."
+
+# 2022-Feb-16
+_tr_add2 add_more_apps_qs            "Choose popular apps to install"                      # runs eos-quickstart
+_tr_add2 add_more_apps_qstip         "Choose popular apps and install them"
+
